@@ -552,7 +552,7 @@ class TextEditorPF2e extends TextEditor {
             type,
             basic,
             dc: rawParams.dc?.trim() || null,
-            defense: rawParams.defense?.trim() || null,
+            against: rawParams.against?.trim() || rawParams.defense?.trim() || null,
             showDC,
             overrideTraits,
             traits,
@@ -663,10 +663,11 @@ class TextEditorPF2e extends TextEditor {
                 pf2Roller: params.roller || null,
                 targetOwner: params.targetOwner,
                 pf2Check: sluggify(params.type),
+                pf2Against: params.against,
             },
         });
 
-        if (params.defense && params.dc) {
+        if (params.against && params.dc) {
             anchor.dataset.tooltip = localize("Invalid", { message: localize("Errors.DCAndDefense") });
             anchor.dataset.invalid = "";
         }
@@ -675,11 +676,8 @@ class TextEditorPF2e extends TextEditor {
             anchor.dataset.itemUuid = item.uuid;
         }
 
-        if (!["flat", "fortitude", "reflex", "will"].includes(params.type) && params.defense) {
-            anchor.dataset.pf2Defense = params.defense;
-        }
-
-        if (params.type && params.dc) {
+        const isSavingThrow = ["fortitude", "reflex", "will"].includes(params.type);
+        if ((params.type && params.dc) || (isSavingThrow && params.against)) {
             // Let the inline roll function handle level base DCs
             const checkDC = params.dc === "@self.level" ? params.dc : getCheckDC({ name, params, item, actor });
             anchor.dataset.pf2Dc = checkDC;
@@ -831,6 +829,18 @@ function getCheckDC({
     item?: ItemPF2e | null;
     actor?: ActorPF2e | null;
 }): string {
+    // Set up inline roll domains. These domains need to match those in inline-roll-links.ts
+    const idDomain = item ? `${item.id}-inline-dc` : null;
+    const slugDomain = `${sluggify(name)}-inline-dc`;
+    const inlineDCDomains = ["inline-dc", idDomain, slugDomain].filter(R.isTruthy);
+
+    // We assume that we can actually display the dc if against is provided.
+    // This function shouldn't be called otherwise.
+    if (!params.dc && params.against && actor) {
+        const statistic = actor.getStatistic(params.against)?.extend({ domains: inlineDCDomains });
+        return String(statistic?.dc.value ?? 0);
+    }
+
     // Retrieve the base value and identify immutability.
     // resolve() is usually a dc that we don't want to re-apply modifiers to.
     const dc = params.dc;
@@ -855,9 +865,7 @@ function getCheckDC({
 
     // Apply modifiers if this item is mutable. The "all" domain catches elite/weak adjustments
     if (base && actor && !immutable) {
-        const idDomain = item ? `${item.id}-inline-dc` : null;
-        const slugDomain = `${sluggify(name)}-inline-dc`;
-        const domains = ["all", "inline-dc", idDomain, slugDomain].filter(R.isTruthy);
+        const domains = ["all", ...inlineDCDomains];
         const { synthetics } = actor;
         const modifier = new ModifierPF2e({
             slug: "base",
@@ -1031,7 +1039,7 @@ interface ConvertXMLNodeOptions {
 interface CheckLinkParams {
     type: string;
     dc?: Maybe<string>;
-    defense?: Maybe<string>;
+    against?: Maybe<string>;
     basic: boolean;
     adjustment?: string;
     traits: string[];
